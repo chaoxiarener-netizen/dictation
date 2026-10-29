@@ -1,6 +1,6 @@
 /* No network dependencies; classic scripts also work over file://. */
 'use strict';
-const $=id=>document.getElementById(id), C=DictationCore;
+const $=id=>document.getElementById(id), C=DictationCore, Sync=window.DictationSync;
 const defaults={showGloss:false,strict:false,rate:1,autoplay:true,autoNext:false,spaceReplay:false};
 let db, data, words=[],byWord=new Map(), mode='main',active=false,graded=false,saving=false,timer,audio,utterance,playToken=0;
 let composing=false,blockCompositionEnter=false,lastCompositionEnd=-Infinity,feedbackWord=null,settingsFocus=null,settingsSelection=null;
@@ -130,12 +130,63 @@ async function submit(skip=false){
  try{await persist();}catch(e){data=old;$('message').textContent='保存失败，本题未计入。请检查浏览器存储后重试。';saving=false;$('submit').disabled=false;return;}
  saving=false;feedbackWord=w;graded=true;$('answer').readOnly=true;$('submit').disabled=false;$('submit').textContent='下一题 · Enter';
  renderFeedback(ok,skip,answer,w);stats();
+ if(Sync&&Sync.getToken()){
+  syncWordCount++;
+  clearTimeout(syncDebounceTimer);
+  if(syncWordCount>=10){syncWordCount=0;triggerPush();}
+  else{syncDebounceTimer=setTimeout(()=>{syncWordCount=0;triggerPush();},8000);}
+ }
  if(data.settings.autoNext)timer=setTimeout(()=>render(),600);
 }
 async function advance(){clearTimeout(timer);render();}
 async function previous(){if(saving)return;clearTimeout(timer);stopAudio();const s=session();s.index=Math.max(0,s.index-1);render();await persist();}
 async function switchMode(next){if(saving)return;stopAudio();clearTimeout(timer);mode=next;if(!data.sessions[mode]||mode==='wrong'||mode==='review')buildSession();data.mode=mode;render();await persist();}
-function settings(){if(saving)return;settingsFocus=document.activeElement;settingsSelection=settingsFocus===$('answer')?[$('answer').selectionStart,$('answer').selectionEnd]:null;clearTimeout(timer);stopAudio();for(const key of Object.keys(defaults)){const el=$(key);if(el.type==='checkbox')el.checked=data.settings[key];else el.value=data.settings[key];}$('modeSelect').value=mode;$('settings').showModal();}
+let syncWordCount=0, syncDebounceTimer=null;
+function updateSyncUI(){
+ if(!Sync)return;
+ const st=Sync.status();
+ const ind=$('syncIndicator'), label=$('syncIndicatorLabel');
+ if(ind&&label){
+  ind.className='sync-indicator';
+  const dot=ind.querySelector('.sync-dot');
+  if(dot)dot.className='sync-dot dot-'+st;
+  if(st==='local'){label.textContent='本地';ind.title='未绑定同步码（纯本地）';}
+  else if(st==='synced'){
+   const t=Sync.getLastSyncedAt()?Sync.getLastSyncedAt().toLocaleTimeString('zh-CN',{hour12:false}):'';
+   label.textContent='已同步';ind.title='已与云端同步'+(t?' · '+t:'');
+  }
+  else if(st==='syncing'){label.textContent='同步中…';ind.title='正在与云端同步…';}
+  else if(st==='pending'){label.textContent='待同步';ind.title='已配置同步码，尚未完成首次同步';}
+  else if(st==='error'){label.textContent='同步遇到问题';ind.title=Sync.getLastError()||'同步遇到问题，点击查看';}
+ }
+ const token=Sync.getToken();
+ if($('syncUnboundArea')&&$('syncBoundArea')){
+  $('syncUnboundArea').hidden=!!token;
+  $('syncBoundArea').hidden=!token;
+  if(token){
+   if($('displaySyncToken'))$('displaySyncToken').textContent=token;
+   if($('syncStatusDesc')){
+    const timeStr=Sync.getLastSyncedAt()?Sync.getLastSyncedAt().toLocaleTimeString('zh-CN',{hour12:false}):'';
+    $('syncStatusDesc').textContent='状态：'+(st==='synced'?'已同步 · '+timeStr:st==='syncing'?'正在同步…':st==='pending'?'待同步':'遇到问题 ('+(Sync.getLastError()||'')+')');
+   }
+  }
+ }
+}
+async function triggerPush(immediate=false){
+ if(!Sync||!Sync.getToken())return;
+ updateSyncUI();
+ try{
+  const merged=await Sync.push(data);
+  if(merged&&Sync.mergeIntoLocal(data,merged)){
+   await persist();stats();if(inWordList)renderWordList();
+  }
+ }catch(e){
+  console.warn('Sync push skipped:',e.message);
+ }finally{
+  updateSyncUI();
+ }
+}
+function settings(){if(saving)return;settingsFocus=document.activeElement;settingsSelection=settingsFocus===$('answer')?[$('answer').selectionStart,$('answer').selectionEnd]:null;clearTimeout(timer);stopAudio();for(const key of Object.keys(defaults)){const el=$(key);if(el.type==='checkbox')el.checked=data.settings[key];else el.value=data.settings[key];}$('modeSelect').value=mode;updateSyncUI();if($('syncMsg')){$('syncMsg').className='sync-msg';$('syncMsg').textContent='';}$('settings').showModal();}
 $('settings').addEventListener('close',async()=>{for(const key of Object.keys(defaults)){const el=$(key);data.settings[key]=el.type==='checkbox'?el.checked:key==='rate'?Number(el.value):el.value;}if($('modeSelect').value!==mode){await switchMode($('modeSelect').value);}else{await persist();$('hint').hidden=!data.settings.showGloss;if(settingsFocus?.isConnected&&document.hasFocus()){settingsFocus.focus();if(settingsSelection)$('answer').setSelectionRange(...settingsSelection);}}});
 let inWordList=false, wlFilter='all', wlQuery='', wlSortBy='freq', wlExpandedWord=null;
 function playWordPreview(item){
@@ -244,6 +295,82 @@ for(const chip of document.querySelectorAll('#wlChips .chip')){
   renderWordList();
  };
 }
+if($('bindSyncBtn'))$('bindSyncBtn').onclick=async()=>{
+ const token=($('syncTokenInput').value||'').trim();
+ if(!token){$('syncMsg').className='sync-msg is-error';$('syncMsg').textContent='请输入同步码';return;}
+ $('syncMsg').className='sync-msg';$('syncMsg').textContent='正在验证同步码…';
+ Sync.setToken(token);updateSyncUI();
+ try{
+  const remote=await Sync.pull();
+  if(remote){Sync.mergeIntoLocal(data,remote);await persist();stats();if(inWordList)renderWordList();}
+  const pushed=await Sync.push(data);
+  if(pushed){Sync.mergeIntoLocal(data,pushed);await persist();stats();if(inWordList)renderWordList();}
+  const timeStr=new Date().toLocaleTimeString('zh-CN',{hour12:false});
+  $('syncMsg').className='sync-msg is-success';$('syncMsg').textContent='同步完成 · '+timeStr;
+  updateSyncUI();
+ }catch(err){
+  const detail=(err&&err.message)||Sync.getLastError()||'';
+  const is401=/401/.test(detail)||(err&&err.status===401);
+  if(is401){
+   Sync.clearToken();
+   $('syncMsg').className='sync-msg is-error';
+   $('syncMsg').textContent='同步码无效 (401)，请检查后重新粘贴';
+  }else{
+   $('syncMsg').className='sync-msg is-error';
+   $('syncMsg').textContent='网络问题，同步码已保留，稍后重试';
+  }
+  updateSyncUI();
+ }
+};
+if($('createSyncBtn'))$('createSyncBtn').onclick=async()=>{
+ $('syncMsg').className='sync-msg';$('syncMsg').textContent='正在创建新同步码…';
+ try{
+  const res=await Sync.signup('IELTS Dictation Web');
+  updateSyncUI(); // 刚建完是 pending
+  $('syncMsg').className='sync-msg is-success';$('syncMsg').textContent='正在推送初始进度…';
+  await Sync.push(data);
+  const timeStr=new Date().toLocaleTimeString('zh-CN',{hour12:false});
+  $('syncMsg').className='sync-msg is-success';$('syncMsg').textContent='同步完成 · '+timeStr;
+  updateSyncUI();
+ }catch(err){
+  $('syncMsg').className='sync-msg is-error';$('syncMsg').textContent='创建或同步失败: '+(err.message||'网络错误');
+  updateSyncUI();
+ }
+};
+if($('copySyncBtn'))$('copySyncBtn').onclick=async()=>{
+ const token=Sync.getToken();if(!token)return;
+ try{
+  await navigator.clipboard.writeText(token);
+  $('syncMsg').className='sync-msg is-success';$('syncMsg').textContent='同步码已复制到剪贴板！发给另一台设备粘贴即可。';
+ }catch{
+  $('syncMsg').className='sync-msg';$('syncMsg').textContent='请长按或双击上方同步码手动复制。';
+ }
+};
+if($('manualSyncBtn'))$('manualSyncBtn').onclick=async()=>{
+ $('syncMsg').className='sync-msg';$('syncMsg').textContent='正在同步…';
+ updateSyncUI();
+ try{
+  const remote=await Sync.pull();
+  if(remote){Sync.mergeIntoLocal(data,remote);}
+  const pushed=await Sync.push(data);
+  if(pushed){Sync.mergeIntoLocal(data,pushed);}
+  await persist();stats();if(inWordList)renderWordList();
+  const timeStr=new Date().toLocaleTimeString('zh-CN',{hour12:false});
+  $('syncMsg').className='sync-msg is-success';$('syncMsg').textContent='同步完成 · '+timeStr;
+ }catch(err){
+  $('syncMsg').className='sync-msg is-error';$('syncMsg').textContent='同步失败: '+(err.message||'网络连接失败，请稍后重试');
+ }finally{
+  updateSyncUI();
+ }
+};
+if($('unbindSyncBtn'))$('unbindSyncBtn').onclick=()=>{
+ Sync.clearToken();
+ $('syncTokenInput').value='';
+ $('syncMsg').className='sync-msg';$('syncMsg').textContent='已解绑此设备，云端数据依然保留';
+ updateSyncUI();
+};
+if($('syncIndicator'))$('syncIndicator').onclick=()=>settings();
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')triggerPush(true);});
 $('answerForm').onsubmit=e=>{e.preventDefault();if(!composing&&!blockCompositionEnter&&performance.now()-lastCompositionEnd>30)submit();};
 $('answer').oninput=()=>{if(!graded&&session()){session().drafts[session().index]=$('answer').value;persist().catch(()=>{$('message').textContent='草稿保存失败';});}};
 $('answer').addEventListener('compositionstart',()=>{composing=true;});
@@ -299,6 +426,19 @@ window.addEventListener('keydown',e=>{
  const occurrences=new Map();words=words.filter(w=>w&&typeof w.word==='string').map(w=>{const n=occurrences.get(w.word)||0;occurrences.set(w.word,n+1);return {...w,key:w.word+'\u001f'+n};}).sort((a,b)=>b.freq-a.freq);byWord=new Map(words.map(w=>[w.key,w]));
  db=await openDB();data=await load();data.settings={...defaults,...data.settings};mode=data.mode||'main';
  data.records||={};data.srs||={};data.daily||={};
+ updateSyncUI();
+ if(Sync&&Sync.getToken()){
+  try{
+   const remote=await Sync.pull();
+   if(remote&&Sync.mergeIntoLocal(data,remote)){
+    await persist();
+   }
+  }catch(e){
+   console.warn('Initial sync pull skipped:',e.message);
+  }finally{
+   updateSyncUI();
+  }
+ }
  // Reconcile imported tables without overwriting the main-line checkpoint.
  for(const key of Object.keys(data.sessions)){const s=data.sessions[key];const before=s.list.slice(0,s.index).filter(w=>byWord.has(w));const after=s.list.slice(s.index).filter(w=>byWord.has(w));if(key==='main')for(const w of words)if(!s.list.includes(w.key))after.push(w.key);s.list=before.concat(after);s.index=before.length;s.drafts||={};}
  if(!data.sessions[mode])buildSession();await persist();render(false);
