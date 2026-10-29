@@ -829,6 +829,9 @@ h2 {
     overflow-y: visible;
   }
   .wl-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
     background: #ffffff;
     border: 1px solid #e1e8de;
     border-radius: 12px;
@@ -838,29 +841,44 @@ h2 {
   }
   .wl-row td {
     border: 0;
-    padding: 2px 0;
+    padding: 0;
     text-align: left;
   }
   .wl-row .wl-word-cell {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 18px;
-    margin-bottom: 4px;
+    flex: 1;
+    font-size: 17px;
+    font-weight: 700;
   }
-  .wl-row .wl-gloss-cell {
+  .wl-row td.wl-status-cell {
+    display: inline-block;
+    width: auto;
+    margin-left: auto;
+    text-align: right;
+  }
+  .wl-row td.wl-gloss-cell {
+    width: 100%;
+    margin: 4px 0 8px;
     max-width: none;
     white-space: normal;
     font-size: 14px;
-    margin-bottom: 8px;
+    color: var(--text-muted);
   }
-  .wl-mobile-meta {
-    display: flex;
-    justify-content: space-between;
+  .wl-row td.wl-num-cell, .wl-row td.wl-due-cell {
+    display: inline-block;
+    width: auto;
     font-size: 12px;
+    margin-right: 12px;
+    color: var(--text-muted);
+  }
+  .wl-row .wl-num-cell::before {
+    content: attr(data-label) " ";
     color: var(--text-subtle);
-    padding-top: 8px;
-    border-top: 1px dashed #edf2ec;
+    font-size: 12px;
+  }
+  .wl-row .wl-due-cell::before {
+    content: "复习 ";
+    color: var(--text-subtle);
+    font-size: 12px;
   }
   .wl-detail-row {
     margin-top: -6px;

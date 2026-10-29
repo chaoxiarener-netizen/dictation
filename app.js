@@ -196,13 +196,13 @@ function renderWordList(){
   tdWord.textContent=it.word;
   const tdGloss=document.createElement('td');tdGloss.className='wl-gloss-cell';
   tdGloss.textContent=it.gloss||'—';tdGloss.title=it.gloss||'';
-  const tdStatus=document.createElement('td');
+  const tdStatus=document.createElement('td');tdStatus.className='wl-status-cell';
   const badge=document.createElement('span');
   badge.className='wl-badge badge-'+it.statusCode;
   badge.textContent=it.status;
   tdStatus.append(badge);
-  const tdRight=document.createElement('td');tdRight.className='wl-num-cell';tdRight.textContent=it.right;
-  const tdWrong=document.createElement('td');tdWrong.className='wl-num-cell'+(it.wrong>0?' has-wrong':'');tdWrong.textContent=it.wrong;
+  const tdRight=document.createElement('td');tdRight.className='wl-num-cell';tdRight.textContent=it.right;tdRight.dataset.label='对';
+  const tdWrong=document.createElement('td');tdWrong.className='wl-num-cell'+(it.wrong>0?' has-wrong':'');tdWrong.textContent=it.wrong;tdWrong.dataset.label='错';
   const tdDue=document.createElement('td');tdDue.className='wl-due-cell';tdDue.textContent=it.due;
   tr.append(tdWord,tdGloss,tdStatus,tdRight,tdWrong,tdDue);
   frag.append(tr);
