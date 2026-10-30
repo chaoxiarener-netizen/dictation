@@ -460,7 +460,13 @@ async function importProgress(file){
  }
 }
 if($('exportProgressBtn'))$('exportProgressBtn').onclick=exportProgress;
-if($('importProgressBtn')&&$('importProgressFile')){
+if($('jumpUnlearnedBtn'))$('jumpUnlearnedBtn').onclick=async()=>{
+ const al=alignToFirstUnlearned(true);
+ await persist();
+ if($('settings').open)$('settings').close();
+ render(false);
+ $('message').textContent=al.allLearned?'主线里的词都练过了，建议切到「复习」或「错词」模式':(al.moved>0?`已跳到第 ${session().index+1} 个词（前面这些都练过）`:'已经在第一个还没练的词上了');
+};if($('importProgressBtn')&&$('importProgressFile')){
  $('importProgressBtn').onclick=()=>$('importProgressFile').click();
  $('importProgressFile').onchange=e=>{const f=e.target.files&&e.target.files[0];if(f)importProgress(f);e.target.value='';};
 }
@@ -515,6 +521,22 @@ window.addEventListener('keydown',e=>{
  else if(e.key==='Backspace'&&!$('answer').value&&!saving&&!e.repeat){e.preventDefault();previous();}
  else if(e.key===' '&&!$('answer').value&&data.settings.spaceReplay&&!saving){e.preventDefault();if(!e.repeat)play();}
 });
+// 同步只合并「每词结果」，不合并「练到第几个」。若本地没有位置但已有学习记录，
+// 自动前进到第一个还没练过的词，避免同步完看起来像从头开始。
+function alignToFirstUnlearned(force){
+ const s=(typeof session==='function')?session():null;
+ if(!s||!Array.isArray(s.list))return {moved:0,allLearned:false};
+ const has=Object.values(data.records||{}).some(r=>r&&r.attempts>0);
+ if(!has)return {moved:0,allLearned:false};
+ if(!force&&s.index!==0)return {moved:0,allLearned:false};
+ let pos=-1;
+ for(let i=0;i<s.list.length;i++){const r=data.records[s.list[i]];if(!r||!r.attempts){pos=i;break;}}
+ if(pos<0)return {moved:0,allLearned:true};
+ if(pos===s.index)return {moved:0,allLearned:false};
+ const moved=Math.max(0,pos-s.index);
+ s.drafts=s.drafts||{};s.index=pos;
+ return {moved,allLearned:false};
+}
 (async()=>{try{
  words=window.WORDS;if(!Array.isArray(words)||!words.length)throw Error('词表为空');
  const occurrences=new Map();words=words.filter(w=>w&&typeof w.word==='string').map(w=>{const n=occurrences.get(w.word)||0;occurrences.set(w.word,n+1);return {...w,key:w.word+'\u001f'+n};}).sort((a,b)=>b.freq-a.freq);byWord=new Map(words.map(w=>[w.key,w]));
@@ -535,7 +557,15 @@ window.addEventListener('keydown',e=>{
  }
  // Reconcile imported tables without overwriting the main-line checkpoint.
  for(const key of Object.keys(data.sessions)){const s=data.sessions[key];const before=s.list.slice(0,s.index).filter(w=>byWord.has(w));const after=s.list.slice(s.index).filter(w=>byWord.has(w));if(key==='main')for(const w of words)if(!s.list.includes(w.key))after.push(w.key);s.list=before.concat(after);s.index=before.length;s.drafts||={};}
- if(!data.sessions[mode])buildSession();await persist();render(false);
+ if(!data.sessions[mode])buildSession();
+ // 只有主线才做「跳过已学」对齐；复习/错词本身就是按规则选出来的队列
+ let alignInfo={moved:0,allLearned:false};
+ if(mode==='main')alignInfo=alignToFirstUnlearned(false);
+ await persist();render(false);
+ if(mode==='main'){
+  if(alignInfo.moved>0)$('message').textContent=`已按同步进度跳过 ${alignInfo.moved} 个学过的词，从第一个没练的接着来（Backspace 可回退）`;
+  else if(alignInfo.allLearned)$('message').textContent='主线里的词都练过了，可以切到「复习」或「错词」模式继续。';
+ }
  if(location.protocol==='file:')$('offline').textContent='本地文件模式：可直接练习；安装 PWA 请使用 HTTPS 或 localhost。';
  else if('serviceWorker'in navigator){const reg=await navigator.serviceWorker.register('sw.js');await navigator.serviceWorker.ready;$('offline').textContent='离线核心已缓存；已存在音频正在后台缓存。';navigator.serviceWorker.addEventListener('message',e=>{if(e.data.type==='audio-cache')$('offline').textContent=`离线核心已就绪 · 已缓存音频 ${e.data.count} 个（缺失词使用系统语音）`;});if(reg.active)reg.active.postMessage({type:'cache-audio',files:words.map(w=>w.audio).filter(Boolean)});}
  }catch(e){$('message').textContent='无法初始化：'+e.message+'。请确认词表可用、浏览器允许 IndexedDB。';$('start').disabled=true;}})();
