@@ -140,7 +140,12 @@ async function push(payload){
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`
    },
-   body: JSON.stringify({ payload: { records: payload.records || {}, srs: payload.srs || {} } })
+   body: JSON.stringify({ payload: {
+    records: payload.records || {},
+    srs: payload.srs || {},
+    daily: payload.daily || {},
+    resume: payload.resume || null
+   } })
   });
   if(res.status === 401){
    currentStatus = 'error';
@@ -236,6 +241,42 @@ function mergeIntoLocal(localData, remotePayload){
    changed = true;
   }
  }
+
+ // 3. 合并按天的练习量（按设备分桶，相加才是真实总量）
+ const remDaily = remotePayload.daily || {};
+  localData.daily = localData.daily || {};
+  const normDay = (e) => {
+   if(!e || typeof e !== 'object') return { devices: {} };
+   if(e.devices && typeof e.devices === 'object') return e;
+   return { devices: { legacy: {
+     words: Array.isArray(e.words) ? e.words.slice() : [],
+     attempts: +e.attempts || 0, correct: +e.correct || 0,
+     wrong: Array.isArray(e.wrong) ? e.wrong.slice() : []
+   } } };
+  };
+  for(const date of new Set([...Object.keys(remDaily), ...Object.keys(localData.daily)])){
+   const loc = normDay(localData.daily[date]);
+   const rem = normDay(remDaily[date]);
+   const devices = { ...(loc.devices || {}) };
+   for(const dev of Object.keys(rem.devices || {})){
+    const a = devices[dev], b = rem.devices[dev];
+    if(!a){ devices[dev] = b; changed = true; continue; }
+    const merged = {
+     words: [...new Set([...(a.words || []), ...(b.words || [])])],
+     attempts: Math.max(+a.attempts || 0, +b.attempts || 0),
+     correct: Math.max(+a.correct || 0, +b.correct || 0),
+     wrong: [...new Set([...(a.wrong || []), ...(b.wrong || [])])]
+    };
+    if(JSON.stringify(merged) !== JSON.stringify(a)){ devices[dev] = merged; changed = true; }
+   }
+   localData.daily[date] = { devices };
+  }
+
+  // 4. 合并「上次练到哪个词」，取更晚的一次
+  if(remotePayload.resume && remotePayload.resume.key){
+   const loc = localData.resume, rem = remotePayload.resume;
+   if(!loc || !loc.key || (rem.at || 0) > (loc.at || 0)){ localData.resume = { ...rem }; changed = true; }
+  }
 
  return changed;
 }

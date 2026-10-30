@@ -6,6 +6,24 @@ let db, data, words=[],byWord=new Map(), mode='main',active=false,graded=false,s
 let awaitingRetry=false, retryAttempt=false;
 let composing=false,blockCompositionEnter=false,lastCompositionEnd=-Infinity,feedbackWord=null,settingsFocus=null,settingsSelection=null;
 const day=()=>new Date().toLocaleDateString('sv-SE');
+// 每台设备一个稳定 id：今天的练习量按设备分开记，合并时相加，正确率才准
+const deviceId=(()=>{try{let d=localStorage.getItem('dictation_device');if(!d){d=Math.random().toString(36).slice(2,10);localStorage.setItem('dictation_device',d);}return d;}catch(e){return 'dev';}})();
+function normDay(entry){
+ if(!entry||typeof entry!=='object')return {devices:{}};
+ if(entry.devices&&typeof entry.devices==='object')return entry;
+ const legacy={words:Array.isArray(entry.words)?entry.words.slice():[],attempts:+entry.attempts||0,correct:+entry.correct||0,wrong:Array.isArray(entry.wrong)?entry.wrong.slice():[]};
+ return {devices:{legacy}};
+}
+function dayTotals(date){
+ const e=normDay((data.daily||{})[date]);
+ let attempts=0,correct=0;const words=new Set(),wrong=new Set();
+ for(const b of Object.values(e.devices||{})){
+  attempts+=+b.attempts||0;correct+=+b.correct||0;
+  for(const x of (b.words||[]))words.add(x);
+  for(const x of (b.wrong||[]))wrong.add(x);
+ }
+ return {attempts,correct,words:[...words],wrong:[...wrong]};
+}
 const blank=()=>({settings:{...defaults},records:{},srs:{},sessions:{},daily:{}});
 function openDB(){return new Promise((resolve,reject)=>{const r=indexedDB.open('ielts-dictation',1);r.onupgradeneeded=()=>r.result.createObjectStore('state');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
 function load(){return new Promise((resolve,reject)=>{const r=db.transaction('state').objectStore('state').get('app');r.onsuccess=()=>resolve(r.result||blank());r.onerror=()=>reject(r.error);});}
@@ -59,11 +77,12 @@ async function play(){
  try{await a.play();if(token!==playToken){try{a.pause();}catch(e){}}}catch(e){clearTimeout(timeout);if(token!==playToken)return;if(e.name==='NotAllowedError')$('audioStatus').textContent='浏览器阻止自动播放，请点重听。';else fallback();}
 }
 function stats(){
- const entries=Object.values(data.records||{}),d=(data.daily||{})[day()]||{words:[],attempts:0,correct:0,wrong:[]};
+ const entries=Object.values(data.records||{});
+ const t=(typeof dayTotals==='function')?dayTotals(day()):{words:[],attempts:0,correct:0,wrong:[]};
  const dueCount=C.countDue(words,data.srs,day());
- $('stats').textContent=`已练 ${entries.filter(r=>r.attempts).length} / ${words.length}　·　待复习 ${dueCount} 个　·　今天练了 ${d.words.length} 个　·　正确率 ${d.attempts?Math.round(d.correct/d.attempts*100):0}%　·　错词 ${entries.filter(r=>r.lastWrongAt).length} 个`;
+ $('stats').textContent=`已练 ${entries.filter(r=>r.attempts).length} / ${words.length}　·　待复习 ${dueCount} 个　·　今天练了 ${t.words.length} 个　·　正确率 ${t.attempts?Math.round(t.correct/t.attempts*100):0}%　·　错词 ${entries.filter(r=>r.lastWrongAt).length} 个`;
  $('coverage').max=words.length;$('coverage').value=entries.filter(r=>r.attempts).length;
- $('wrongList').textContent=d.wrong.join(' · ')||'暂无';
+ $('wrongList').textContent=t.wrong.join(' · ')||'暂无';
 }
 function focusAnswer(){if(active&&current()&&!$('settings').open&&document.hasFocus()&&!document.hidden)$('answer').focus();}
 function showHint(){const w=current();$('hint').textContent=w?.gloss||'此词暂无中文释义';$('hint').hidden=false;focusAnswer();}
@@ -153,8 +172,11 @@ async function submit(skip=false){
  if(!retryAttempt){
   data.records[w.key]=C.account(data.records[w.key],ok);
   data.srs[w.key]=C.updateSRS(data.srs[w.key],ok,day());
-  const d=data.daily[day()]||={words:[],attempts:0,correct:0,wrong:[]};
-  if(!d.words.includes(w.key))d.words.push(w.key);d.attempts++;if(ok)d.correct++;else if(!d.wrong.includes(w.word))d.wrong.push(w.word);
+  const dateKey=day();
+  const entry=data.daily[dateKey]=normDay(data.daily[dateKey]);
+  const bucket=entry.devices[deviceId]||=( {words:[],attempts:0,correct:0,wrong:[]} );
+  if(!bucket.words.includes(w.key))bucket.words.push(w.key);
+  bucket.attempts++;if(ok)bucket.correct++;else if(!bucket.wrong.includes(w.word))bucket.wrong.push(w.word);
  }
  // 答错且开着「拼对才进下一个」：停在原词，不进下一题
  const mustRetry=!ok&&!skip&&!!data.settings.retryUntilCorrect;
@@ -162,6 +184,7 @@ async function submit(skip=false){
   s.drafts[s.index]='';
  }else{
   s.drafts[s.index]=answer;s.index++;
+  data.resume={key:w.key,at:Date.now()}; // 记住练到哪个词，换设备时接着来
  }
  try{await persist();}catch(e){data=old;$('message').textContent='保存失败，本题未计入。请检查浏览器存储后重试。';saving=false;$('submit').disabled=false;return;}
  saving=false;feedbackWord=w;graded=true;$('answer').readOnly=true;$('submit').disabled=false;
@@ -532,6 +555,12 @@ function alignToFirstUnlearned(force){
  const has=Object.values(data.records||{}).some(r=>r&&r.attempts>0);
  if(!has)return {moved:0,allLearned:false};
  if(!force&&s.index!==0)return {moved:0,allLearned:false};
+ // 1) 优先续上「上次练到的那个词」之后
+ const rp=data.resume;
+ if(rp&&rp.key){
+  const at=s.list.indexOf(rp.key);
+  if(at>=0&&at+1>s.index){const m=at+1-s.index;s.index=at+1;s.drafts=s.drafts||{};return {moved:m,allLearned:false,via:'resume'};}
+ }
  let pos=-1;
  for(let i=0;i<s.list.length;i++){const r=data.records[s.list[i]];if(!r||!r.attempts){pos=i;break;}}
  if(pos<0)return {moved:0,allLearned:true};
