@@ -496,7 +496,21 @@ if($('jumpUnlearnedBtn'))$('jumpUnlearnedBtn').onclick=async()=>{
  $('importProgressBtn').onclick=()=>$('importProgressFile').click();
  $('importProgressFile').onchange=e=>{const f=e.target.files&&e.target.files[0];if(f)importProgress(f);e.target.value='';};
 }
-document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')triggerPush(true);});
+let lastAutoPull=0;
+document.addEventListener('visibilitychange',async()=>{
+ if(document.visibilityState==='hidden'){triggerPush(true);return;}
+ // 切回标签页时顺手拉一次，避免"另一台设备练了，这边开着不动"的错觉
+ if(!Sync||!Sync.getToken())return;
+ if(Date.now()-lastAutoPull<30000)return;
+ lastAutoPull=Date.now();
+ try{
+  const remote=await Sync.pull();
+  if(remote&&Sync.mergeIntoLocal(data,remote)){
+   await persist();stats();if(inWordList)renderWordList();
+  }
+  updateSyncUI();
+ }catch(e){/* 网络问题不打扰 */}
+});
 $('answerForm').onsubmit=e=>{e.preventDefault();if(!composing&&!blockCompositionEnter&&performance.now()-lastCompositionEnd>30)submit();};
 $('answer').oninput=()=>{if(!graded&&session()){session().drafts[session().index]=$('answer').value;persist().catch(()=>{$('message').textContent='草稿保存失败';});}};
 $('answer').addEventListener('compositionstart',()=>{composing=true;});
