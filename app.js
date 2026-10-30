@@ -2,7 +2,7 @@
 'use strict';
 const $=id=>document.getElementById(id), C=DictationCore, Sync=window.DictationSync;
 const defaults={showGloss:false,strict:false,rate:1,autoplay:true,autoNext:false,spaceReplay:false};
-let db, data, words=[],byWord=new Map(), mode='main',active=false,graded=false,saving=false,timer,audio,utterance,playToken=0;
+let db, data, words=[],byWord=new Map(), mode='main',active=false,graded=false,saving=false,timer,audio,audioEl=null,utterance,playToken=0;
 let composing=false,blockCompositionEnter=false,lastCompositionEnd=-Infinity,feedbackWord=null,settingsFocus=null,settingsSelection=null;
 const day=()=>new Date().toLocaleDateString('sv-SE');
 const blank=()=>({settings:{...defaults},records:{},srs:{},sessions:{},daily:{}});
@@ -22,7 +22,18 @@ function buildSession(){
  data.sessions[mode]={list,index:0,drafts:{}};
 }
 function current(){return graded&&feedbackWord?feedbackWord:byWord.get(session()?.list[session().index]);}
-function stopAudio(){playToken++;if(audio){audio.pause();audio.removeAttribute('src');audio.load();audio=null;}if(window.speechSynthesis)speechSynthesis.cancel();}
+function getAudio(){
+ if(!audioEl){audioEl=new Audio();audioEl.preload='auto';}
+ return audioEl;
+}
+function stopAudio(){
+ playToken++;
+ if(audioEl){
+  try{audioEl.pause();}catch(e){}
+  try{audioEl.currentTime=0;}catch(e){}
+ }
+ if(window.speechSynthesis)speechSynthesis.cancel();
+}
 function speakFallback(word,token){
  if(token!==playToken)return;
  $('audioStatus').textContent='音频缺失或不可播放 · 使用浏览器语音';
@@ -35,11 +46,16 @@ async function play(){
  const w=current();if(!active||!w||$('settings').open)return;
  stopAudio();const token=playToken; $('audioStatus').textContent=`语速 ${data.settings.rate} ×`;
  if(!w.audio){speakFallback(w.word,token);return;}
- const a=audio=new Audio('audio/'+encodeURIComponent(w.audio));a.playbackRate=data.settings.rate;
+ // 全局只用一个播放器：重听时倒回去重播，避免连续按键叠出多个音轨
+ const a=getAudio();audio=a;
+ const src='audio/'+encodeURIComponent(w.audio);
+ if(a.getAttribute('src')!==src)a.setAttribute('src',src);
+ try{a.currentTime=0;}catch(e){}
+ a.playbackRate=data.settings.rate;
  let timeout=setTimeout(fallback,5000),fell=false;
- function fallback(){if(fell||token!==playToken)return;fell=true;clearTimeout(timeout);a.pause();speakFallback(w.word,token);}
+ function fallback(){if(fell||token!==playToken)return;fell=true;clearTimeout(timeout);try{a.pause();}catch(e){}speakFallback(w.word,token);}
  a.onerror=fallback;a.onplaying=()=>clearTimeout(timeout);
- try{await a.play();if(token!==playToken)a.pause();}catch(e){clearTimeout(timeout);if(token!==playToken)return;if(e.name==='NotAllowedError')$('audioStatus').textContent='浏览器阻止自动播放，请按空格或点重听。';else fallback();}
+ try{await a.play();if(token!==playToken){try{a.pause();}catch(e){}}}catch(e){clearTimeout(timeout);if(token!==playToken)return;if(e.name==='NotAllowedError')$('audioStatus').textContent='浏览器阻止自动播放，请点重听。';else fallback();}
 }
 function stats(){
  const entries=Object.values(data.records||{}),d=(data.daily||{})[day()]||{words:[],attempts:0,correct:0,wrong:[]};
