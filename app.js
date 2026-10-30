@@ -427,6 +427,43 @@ if($('unbindSyncBtn'))$('unbindSyncBtn').onclick=()=>{
  updateSyncUI();
 };
 if($('syncIndicator'))$('syncIndicator').onclick=()=>settings();
+// 进度导出 / 导入：换域名、换设备、同步不通时都能把进度搬过去
+function exportProgress(){
+ const payload={version:1,exportedAt:new Date().toISOString(),records:data.records||{},srs:data.srs||{},daily:data.daily||{}};
+ const blob=new Blob([JSON.stringify(payload)],{type:'application/json'});
+ const a=document.createElement('a');
+ a.href=URL.createObjectURL(blob);
+ a.download='听写进度-'+(new Date().toISOString().slice(0,10))+'.json';
+ document.body.append(a);a.click();a.remove();
+ setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+ if($('syncMsg')){$('syncMsg').className='sync-msg is-success';$('syncMsg').textContent='已导出进度文件（含 '+Object.keys(payload.records).length+' 个词的记录）';}
+}
+async function importProgress(file){
+ try{
+  const text=await file.text();
+  const payload=JSON.parse(text);
+  if(!payload||typeof payload!=='object'||(!payload.records&&!payload.srs))throw new Error('文件格式不对');
+  const before=Object.keys(data.records||{}).length;
+  if(Sync&&Sync.mergeIntoLocal){Sync.mergeIntoLocal(data,{records:payload.records||{},srs:payload.srs||{}});}
+  else{
+   data.records=Object.assign({},payload.records||{},data.records||{});
+   data.srs=Object.assign({},payload.srs||{},data.srs||{});
+  }
+  if(payload.daily){for(const [k,v] of Object.entries(payload.daily)){const cur=data.daily[k];if(!cur||((v.attempts||0)>(cur.attempts||0)))data.daily[k]=v;}}
+  await persist();stats();if(inWordList)renderWordList();
+  const after=Object.keys(data.records||{}).length;
+  $('syncMsg').className='sync-msg is-success';
+  $('syncMsg').textContent='导入完成：词条 '+before+' → '+after+' 个，已合并（不会覆盖已有的更优记录）';
+ }catch(e){
+  $('syncMsg').className='sync-msg is-error';
+  $('syncMsg').textContent='导入失败：'+(e.message||'文件无法读取');
+ }
+}
+if($('exportProgressBtn'))$('exportProgressBtn').onclick=exportProgress;
+if($('importProgressBtn')&&$('importProgressFile')){
+ $('importProgressBtn').onclick=()=>$('importProgressFile').click();
+ $('importProgressFile').onchange=e=>{const f=e.target.files&&e.target.files[0];if(f)importProgress(f);e.target.value='';};
+}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')triggerPush(true);});
 $('answerForm').onsubmit=e=>{e.preventDefault();if(!composing&&!blockCompositionEnter&&performance.now()-lastCompositionEnd>30)submit();};
 $('answer').oninput=()=>{if(!graded&&session()){session().drafts[session().index]=$('answer').value;persist().catch(()=>{$('message').textContent='草稿保存失败';});}};
