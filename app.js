@@ -1,8 +1,9 @@
 /* No network dependencies; classic scripts also work over file://. */
 'use strict';
 const $=id=>document.getElementById(id), C=DictationCore, Sync=window.DictationSync;
-const defaults={showGloss:false,strict:false,rate:1,autoplay:true,autoNext:false,spaceReplay:false};
+const defaults={showGloss:false,strict:false,rate:1,autoplay:true,autoNext:false,spaceReplay:false,retryUntilCorrect:true};
 let db, data, words=[],byWord=new Map(), mode='main',active=false,graded=false,saving=false,timer,audio,audioEl=null,utterance,playToken=0;
+let awaitingRetry=false, retryAttempt=false;
 let composing=false,blockCompositionEnter=false,lastCompositionEnd=-Infinity,feedbackWord=null,settingsFocus=null,settingsSelection=null;
 const day=()=>new Date().toLocaleDateString('sv-SE');
 const blank=()=>({settings:{...defaults},records:{},srs:{},sessions:{},daily:{}});
@@ -104,7 +105,7 @@ function renderFeedback(ok,skip,answer,w){
  }
 }
 function render(autoplay=true){
- clearTimeout(timer);stopAudio();$('audioStatus').textContent='';graded=false;feedbackWord=null;const s=session(),w=current();stats();
+ clearTimeout(timer);stopAudio();$('audioStatus').textContent='';graded=false;feedbackWord=null;awaitingRetry=false;retryAttempt=false;const s=session(),w=current();stats();
  document.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));
  const modeLabels={main:'主线',review:'复习',wrong:'错词',random:'随机'};
  $('progress').textContent=w?`${modeLabels[mode]||'练习'} · 第 ${s.index+1} / ${s.list.length} 个`:'本轮已结束';
@@ -132,27 +133,64 @@ function render(autoplay=true){
 }
 async function start(){if(!data)return;active=true;render();await persist();}
 async function submit(skip=false){
- if(saving)return;if(graded){await advance();return;}const w=current();if(!w)return;
+ if(saving)return;
+ if(graded){
+  // 跳过硬优先：Alt+→ 任何时候都能过，不会被"必须拼对"卡死
+  if(skip){
+   if(awaitingRetry){const s=session();s.drafts[s.index]='';s.index++;awaitingRetry=false;retryAttempt=false;await persist();}
+   await advance();return;
+  }
+  if(!awaitingRetry){await advance();return;}
+  startRetry();return;
+ }
+ const w=current();if(!w)return;
  saving=true;clearTimeout(timer);stopAudio();$('submit').disabled=true;
  const answer=$('answer').value;
  if(!skip&&!answer.trim()){saving=false;$('submit').disabled=false;$('message').textContent='先输入答案；要跳过请按 Alt+→。';return;}
  $('message').textContent='';const ok=!skip&&C.grade(answer,w.word,data.settings.strict),s=session();
  const old=structuredClone(data);
- data.records[w.key]=C.account(data.records[w.key],ok);
- data.srs[w.key]=C.updateSRS(data.srs[w.key],ok,day());
- const d=data.daily[day()]||={words:[],attempts:0,correct:0,wrong:[]};
- if(!d.words.includes(w.key))d.words.push(w.key);d.attempts++;if(ok)d.correct++;else if(!d.wrong.includes(w.word))d.wrong.push(w.word);
- s.drafts[s.index]=answer;s.index++; // Save the next unanswered word before showing the result.
+ // 重试轮的作答不再计入统计与艾宾浩斯，首次对错已经记过账
+ if(!retryAttempt){
+  data.records[w.key]=C.account(data.records[w.key],ok);
+  data.srs[w.key]=C.updateSRS(data.srs[w.key],ok,day());
+  const d=data.daily[day()]||={words:[],attempts:0,correct:0,wrong:[]};
+  if(!d.words.includes(w.key))d.words.push(w.key);d.attempts++;if(ok)d.correct++;else if(!d.wrong.includes(w.word))d.wrong.push(w.word);
+ }
+ // 答错且开着「拼对才进下一个」：停在原词，不进下一题
+ const mustRetry=!ok&&!skip&&!!data.settings.retryUntilCorrect;
+ if(mustRetry){
+  s.drafts[s.index]='';
+ }else{
+  s.drafts[s.index]=answer;s.index++;
+ }
  try{await persist();}catch(e){data=old;$('message').textContent='保存失败，本题未计入。请检查浏览器存储后重试。';saving=false;$('submit').disabled=false;return;}
- saving=false;feedbackWord=w;graded=true;$('answer').readOnly=true;$('submit').disabled=false;$('submit').textContent='下一题 · Enter';
- renderFeedback(ok,skip,answer,w);stats();
- if(Sync&&Sync.getToken()){
+ saving=false;feedbackWord=w;graded=true;$('answer').readOnly=true;$('submit').disabled=false;
+ if(mustRetry){
+  awaitingRetry=true;
+  $('submit').textContent='重来 · Enter';
+  renderFeedback(false,false,answer,w);
+  $('message').textContent='拼对才能进入下一个词';
+ }else{
+  awaitingRetry=false;retryAttempt=false;
+  $('submit').textContent='下一题 · Enter';
+  renderFeedback(ok,skip,answer,w);
+ }
+ stats();
+ if(!retryAttempt&&Sync&&Sync.getToken()){
   syncWordCount++;
   clearTimeout(syncDebounceTimer);
   if(syncWordCount>=10){syncWordCount=0;triggerPush();}
   else{syncDebounceTimer=setTimeout(()=>{syncWordCount=0;triggerPush();},8000);}
  }
  if(data.settings.autoNext)timer=setTimeout(()=>render(),600);
+}
+function startRetry(){
+ awaitingRetry=false;retryAttempt=true;graded=false;
+ $('answer').value='';$('answer').readOnly=false;
+ $('submit').textContent='提交 · Enter';
+ $('message').textContent='拼对才能进入下一个词';
+ $('answer').focus();
+ play();
 }
 async function advance(){clearTimeout(timer);render();}
 async function previous(){if(saving)return;clearTimeout(timer);stopAudio();const s=session();s.index=Math.max(0,s.index-1);render();await persist();}

@@ -2,7 +2,10 @@
 (function(root){
 'use strict';
 
-const ENDPOINT = 'https://dictation-sync.chaoxiarener.workers.dev';
+// 同源部署时（Cloudflare Pages）直接走本域 /api，省一次跨域；其他来源回落到独立 Worker。
+const WORKER_ENDPOINT = 'https://dictation-sync.chaoxiarener.workers.dev';
+const SAME_ORIGIN = (typeof location !== 'undefined' && /(^|\.)pages\.dev$/.test(location.hostname || ''));
+const ENDPOINT = SAME_ORIGIN ? location.origin : WORKER_ENDPOINT;
 const STORAGE_KEY = 'sync_token';
 
 let currentStatus = 'local'; // 'local' | 'pending' | 'synced' | 'syncing' | 'error'
