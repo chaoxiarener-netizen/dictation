@@ -590,8 +590,10 @@ function alignToFirstUnlearned(force){
   if(al.moved>0)$('message').textContent=`已按同步进度跳过 ${al.moved} 个学过的词，从第一个没练的接着来（Backspace 可回退）`;
   else if(al.allLearned)$('message').textContent='主线里的词都练过了，可以切到「复习」或「错词」模式继续。';
  }
- (async()=>{try{
-  words=window.WORDS;if(!Array.isArray(words)||!words.length)throw Error('词表为空');
+const BUILD='2026-10-30 · 同步版 v26';
+(async()=>{try{
+ if($('buildInfo'))$('buildInfo').textContent='构建 '+BUILD;
+ words=window.WORDS;if(!Array.isArray(words)||!words.length)throw Error('词表为空');
  const occurrences=new Map();words=words.filter(w=>w&&typeof w.word==='string').map(w=>{const n=occurrences.get(w.word)||0;occurrences.set(w.word,n+1);return {...w,key:w.word+'\u001f'+n};}).sort((a,b)=>b.freq-a.freq);byWord=new Map(words.map(w=>[w.key,w]));
  db=await openDB();data=await load();data.settings={...defaults,...data.settings};mode=data.mode||'main';
  data.records||={};data.srs||={};data.daily||={};
