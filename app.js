@@ -362,6 +362,7 @@ if($('bindSyncBtn'))$('bindSyncBtn').onclick=async()=>{
   if(remote){Sync.mergeIntoLocal(data,remote);await persist();stats();if(inWordList)renderWordList();}
   const pushed=await Sync.push(data);
   if(pushed){Sync.mergeIntoLocal(data,pushed);await persist();stats();if(inWordList)renderWordList();}
+  await alignAfterMerge();
   const timeStr=new Date().toLocaleTimeString('zh-CN',{hour12:false});
   $('syncMsg').className='sync-msg is-success';$('syncMsg').textContent='同步完成 · '+timeStr;
   updateSyncUI();
@@ -412,6 +413,7 @@ if($('manualSyncBtn'))$('manualSyncBtn').onclick=async()=>{
   const pushed=await Sync.push(data);
   if(pushed){Sync.mergeIntoLocal(data,pushed);}
   await persist();stats();if(inWordList)renderWordList();
+  await alignAfterMerge();
   const timeStr=new Date().toLocaleTimeString('zh-CN',{hour12:false});
   $('syncMsg').className='sync-msg is-success';$('syncMsg').textContent='同步完成 · '+timeStr;
  }catch(err){
@@ -451,6 +453,7 @@ async function importProgress(file){
   }
   if(payload.daily){for(const [k,v] of Object.entries(payload.daily)){const cur=data.daily[k];if(!cur||((v.attempts||0)>(cur.attempts||0)))data.daily[k]=v;}}
   await persist();stats();if(inWordList)renderWordList();
+  await alignAfterMerge();
   const after=Object.keys(data.records||{}).length;
   $('syncMsg').className='sync-msg is-success';
   $('syncMsg').textContent='导入完成：词条 '+before+' → '+after+' 个，已合并（不会覆盖已有的更优记录）';
@@ -537,8 +540,15 @@ function alignToFirstUnlearned(force){
  s.drafts=s.drafts||{};s.index=pos;
  return {moved,allLearned:false};
 }
-(async()=>{try{
- words=window.WORDS;if(!Array.isArray(words)||!words.length)throw Error('词表为空');
+ async function alignAfterMerge(){
+  if(mode!=='main'||inWordList)return;
+  const al=alignToFirstUnlearned(false);
+  render(false);
+  if(al.moved>0)$('message').textContent=`已按同步进度跳过 ${al.moved} 个学过的词，从第一个没练的接着来（Backspace 可回退）`;
+  else if(al.allLearned)$('message').textContent='主线里的词都练过了，可以切到「复习」或「错词」模式继续。';
+ }
+ (async()=>{try{
+  words=window.WORDS;if(!Array.isArray(words)||!words.length)throw Error('词表为空');
  const occurrences=new Map();words=words.filter(w=>w&&typeof w.word==='string').map(w=>{const n=occurrences.get(w.word)||0;occurrences.set(w.word,n+1);return {...w,key:w.word+'\u001f'+n};}).sort((a,b)=>b.freq-a.freq);byWord=new Map(words.map(w=>[w.key,w]));
  db=await openDB();data=await load();data.settings={...defaults,...data.settings};mode=data.mode||'main';
  data.records||={};data.srs||={};data.daily||={};
