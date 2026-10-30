@@ -554,13 +554,13 @@ function alignToFirstUnlearned(force){
  if(!s||!Array.isArray(s.list))return {moved:0,allLearned:false};
  const has=Object.values(data.records||{}).some(r=>r&&r.attempts>0);
  if(!has)return {moved:0,allLearned:false};
- if(!force&&s.index!==0)return {moved:0,allLearned:false};
- // 1) 优先续上「上次练到的那个词」之后
+ // 1) 续上「上次练到的那个词」之后：只要对面更靠后就前进，比本地落后就不动
  const rp=data.resume;
  if(rp&&rp.key){
   const at=s.list.indexOf(rp.key);
   if(at>=0&&at+1>s.index){const m=at+1-s.index;s.index=at+1;s.drafts=s.drafts||{};return {moved:m,allLearned:false,via:'resume'};}
  }
+ if(!force&&s.index!==0)return {moved:0,allLearned:false};
  let pos=-1;
  for(let i=0;i<s.list.length;i++){const r=data.records[s.list[i]];if(!r||!r.attempts){pos=i;break;}}
  if(pos<0)return {moved:0,allLearned:true};
