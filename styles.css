@@ -430,6 +430,25 @@ h1 {
   color: #244133;
 }
 
+/* 重试输入时隐藏正确答案，只留中文释义，避免照着抄 */
+#feedback.is-retrying .fb-correct-word,
+#feedback.is-retrying .fb-comp-row,
+#feedback.is-retrying .fb-spelling-row,
+#feedback.is-retrying .fb-label,
+#feedback.is-retrying .fb-word {
+  display: none;
+}
+
+#feedback.is-retrying .fb-header {
+  min-height: 0;
+  margin-bottom: 2px;
+}
+
+#feedback.is-retrying .fb-gloss {
+  margin-top: 2px;
+  font-size: 15px;
+}
+
 /* 中文释义：次级样式，小一号灰一点，CSS line-clamp 限制 2 行 */
 .fb-gloss {
   margin-top: 8px;

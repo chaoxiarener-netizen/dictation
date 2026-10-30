@@ -189,6 +189,9 @@ function startRetry(){
  $('answer').value='';$('answer').readOnly=false;
  $('submit').textContent='提交 · Enter';
  $('message').textContent='拼对才能进入下一个词';
+ // 开始重打时把正确答案藏起来，只留中文释义，避免照着抄
+ const fb=$('feedback');if(fb){fb.classList.add('is-retrying');}
+ const badge=fb&&fb.querySelector('.fb-badge');if(badge)badge.textContent='再拼一次';
  $('answer').focus();
  play();
 }
