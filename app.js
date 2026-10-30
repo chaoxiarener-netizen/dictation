@@ -574,6 +574,11 @@ function alignToFirstUnlearned(force){
   const at=s.list.indexOf(rp.key);
   if(at>=0&&at+1>s.index){const m=at+1-s.index;s.index=at+1;s.drafts=s.drafts||{};return {moved:m,allLearned:false,via:'resume'};}
  }
+ // 2) 没有续练指针时，用「从开头连续练过的词数」推断：主线是按考频顺序练的，
+ //    前 N 个都练过就等价于应该在第 N+1 个。只依赖 records，最可靠。
+ let prefix=0;
+ for(let i=0;i<s.list.length;i++){const r=data.records[s.list[i]];if(r&&r.attempts>0)prefix++;else break;}
+ if(prefix>s.index){const m=prefix-s.index;s.index=prefix;s.drafts=s.drafts||{};return {moved:m,allLearned:false,via:'prefix'};}
  if(!force&&s.index!==0)return {moved:0,allLearned:false};
  let pos=-1;
  for(let i=0;i<s.list.length;i++){const r=data.records[s.list[i]];if(!r||!r.attempts){pos=i;break;}}
