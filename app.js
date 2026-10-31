@@ -595,7 +595,7 @@ function alignToFirstUnlearned(force){
   if(al.moved>0)$('message').textContent=`已按同步进度跳过 ${al.moved} 个学过的词，从第一个没练的接着来（Backspace 可回退）`;
   else if(al.allLearned)$('message').textContent='主线里的词都练过了，可以切到「复习」或「错词」模式继续。';
  }
-const BUILD='2026-10-30 · 同步版 v26';
+const BUILD='2026-10-31 · 同步版 v28（位置按记录推算）';
 (async()=>{try{
  if($('buildInfo'))$('buildInfo').textContent='构建 '+BUILD;
  words=window.WORDS;if(!Array.isArray(words)||!words.length)throw Error('词表为空');
